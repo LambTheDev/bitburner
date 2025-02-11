@@ -20,6 +20,10 @@
       "/*": ["*"],
       "@ns": ["../NetscriptDefinitions.d.ts"],
       "@react": ["lib/react.ts"]
-    }
+    },
+    "types": [
+      "vitest/importMeta"
+    ],
+    "skipLibCheck": true
   }
 }
