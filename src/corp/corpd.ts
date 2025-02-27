@@ -1,9 +1,22 @@
-import { CityName, CorpEmployeePosition, CorpIndustryName, CorpMaterialName, CorpStateName, CorpUnlockName, CorpUpgradeName, NS } from "@ns";
+import {
+  CityName,
+  CorpEmployeePosition,
+  CorpIndustryName,
+  CorpMaterialName,
+  CorpResearchName,
+  CorpStateName,
+  CorpUnlockName,
+  CorpUpgradeName,
+  NS,
+} from "@ns";
 
-type DivisionName = 'agri' | 'chem';
+const MAIN_OFFICE: CityName = CityName.Sector12;
+
+type DivisionName = 'agri' | 'chem' | 'cigs';
 const divisions: Record<DivisionName, CorpIndustryName> = {
   'agri': 'Agriculture',
   'chem': 'Chemical',
+  'cigs': 'Tobacco',
 }
 
 type Team = Partial<Record<CorpEmployeePosition, number>>;
@@ -55,7 +68,7 @@ export async function main(ns: NS): Promise<void> {
           }
         });
 
-        await waitState('START', true);
+        await waitState('SALE', true);
       }
     });
   }
@@ -207,6 +220,143 @@ export async function main(ns: NS): Promise<void> {
       ns.corporation.setSmartSupply('chem' as DivisionName, cityName, true);
     });
     mkRaiseFundsAsync(2, 11e12);
+  }
+
+  async function doPhase3Async() {
+    mkDivision('cigs');
+    await doCitiesParallel(async (cityName) => {
+      // cancel to prio cigs
+      ns.corporation.cancelExportMaterial(
+        'agri' as DivisionName,
+        cityName,
+        'chem' as DivisionName,
+        cityName,
+        'Plants' as CorpMaterialName,
+      );
+      mkExportRoute('Plants', cityName, 'cigs', 'agri');
+      mkExportRoute('Plants', cityName, 'chem', 'agri');
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        // buy research
+        // buy Wilson and Advert
+        // develop new product
+        // upgrade product division and buy corporation's upgrades
+        // upgrade support divisions
+        await waitState('START', true);
+      }
+    });
+  }
+
+  // WIP: p3 things
+  function upgResearch(divisionName: DivisionName) {
+    const moraleRpX = 1 / 0.2;
+    const prodRpX = 1 / 0.1;
+    const researches: Array<{
+      research: CorpResearchName,
+      rpNeededMultiplier: number,
+    }> = [
+      { research: 'Hi-Tech R&D Laboratory', rpNeededMultiplier: 1 },
+      { research: 'Market-TA.I', rpNeededMultiplier: prodRpX },
+      { research: 'Market-TA.II', rpNeededMultiplier: prodRpX },
+      { research: 'Automatic Drug Administration', rpNeededMultiplier: prodRpX },
+      { research: 'Go-Juice', rpNeededMultiplier: moraleRpX },
+      { research: 'CPH4 Injections', rpNeededMultiplier: moraleRpX },
+      { research: 'Overclock', rpNeededMultiplier: moraleRpX },
+      { research: 'Sti.mu', rpNeededMultiplier: moraleRpX },
+      { research: 'Drones', rpNeededMultiplier: prodRpX },
+      { research: 'Drones - Assembly', rpNeededMultiplier: prodRpX },
+      { research: 'Drones - Transport', rpNeededMultiplier: prodRpX },
+      { research: 'Self-Correcting Assemblers', rpNeededMultiplier: prodRpX },
+      { research: 'uPgrade: Fulcrum', rpNeededMultiplier: prodRpX },
+    ];
+    for (const { research, rpNeededMultiplier } of researches) {
+      if (ns.corporation.hasResearched(divisionName, research)) continue;
+
+      const rpCost = ns.corporation.getResearchCost(divisionName, research);
+      const rpNeeded = rpCost * rpNeededMultiplier;
+
+      if (ns.corporation.getDivision(divisionName).researchPoints > rpNeeded) {
+        ns.corporation.research(divisionName, research);
+      }
+      // for now, let's prio Market-TA.II
+      if (research == 'Market-TA.II') {
+        break;
+      }
+    }
+  }
+
+  function upgWilson(budget: number) {
+    const division = ns.corporation.getDivision('cigs' as DivisionName);
+    if (division.awareness === Number.MAX_VALUE) return;
+    if (division.popularity === Number.MAX_VALUE) return;
+
+    const wilson: CorpUpgradeName = 'Wilson Analytics';
+    let spent = 0;
+    let nextCost = ns.corporation.getUpgradeLevelCost(wilson);
+    while (spent + nextCost < budget) {
+      ns.corporation.levelUpgrade(wilson);
+      spent += nextCost;
+      nextCost = ns.corporation.getUpgradeLevelCost(wilson);
+    }
+  }
+
+  function upgAdVert(divisionName: DivisionName, budget: number) {
+    const division = ns.corporation.getDivision('cigs' as DivisionName);
+    if (division.awareness === Number.MAX_VALUE) return;
+    if (division.popularity === Number.MAX_VALUE) return;
+
+    let spent = 0;
+    let nextCost = ns.corporation.getHireAdVertCost(divisionName);
+    while (spent + nextCost < budget) {
+      ns.corporation.hireAdVert(divisionName);
+      spent += nextCost;
+      nextCost = ns.corporation.getHireAdVertCost(divisionName);
+    }
+  }
+
+  function developProduct(budget: number) {
+    const divisionName: DivisionName = 'cigs';
+    const division = ns.corporation.getDivision(divisionName);
+    const products = division.products
+      // named so that ordering alphanumerically is also ordered by age
+      .sort((lhs, rhs) => lhs.localeCompare(rhs))
+      .map(productName => ns.corporation.getProduct(
+        divisionName,
+        MAIN_OFFICE,
+        productName,
+      ));
+    // do we have a product in development?
+    if (products.find(x => x.developmentProgress < 100) != null) return;
+
+    if (products.length === 3) {
+      // first is oldest
+      ns.corporation.discontinueProduct(divisionName, products[0].name);
+    }
+
+    const productName = `cig-${Date.now()}`;
+    const invest = budget / 2;
+    ns.corporation.makeProduct(
+      divisionName,
+      MAIN_OFFICE,
+      productName,
+      invest,
+      invest,
+    );
+  }
+
+  function upgRawProduction(budget: number) {
+    // TODO
+  }
+
+  function upgOffices(budget: number) {
+    // TODO
+  }
+
+  function upgUpgrades(budget: number) {
+    const statBudget = budget * 8 / 10;
+    const salesAndProjectBudget = budget * 1 / 10;
+    // TODO
   }
 
 
